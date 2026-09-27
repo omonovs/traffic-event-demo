@@ -180,6 +180,48 @@ hr {{
     font-size: 0.95rem;
     margin-bottom: 0;
 }}
+[data-testid="stVerticalBlockBorderWrapper"] {{
+    position: relative;
+    overflow: visible;
+}}
+
+.mascot-wrap {{
+    position: absolute;
+    top: -16px;
+    right: -12px;
+    width: 46px;
+    height: 46px;
+    z-index: 5;
+}}
+.mascot {{
+    position: relative;
+    display: inline-block;
+    font-size: 32px;
+    cursor: default;
+    transition: transform 0.35s ease, filter 0.35s ease;
+    transform-origin: bottom center;
+    filter: drop-shadow(0 0 0 rgba(255,255,255,0));
+}}
+.mascot::after {{
+    content: "";
+    position: absolute;
+    top: 1px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 6px 2px rgba(255,255,255,0.9), 0 0 16px 5px rgba(255,255,255,0.45);
+    animation: mishka-glow 2.4s ease-in-out infinite;
+}}
+@keyframes mishka-glow {{
+    0%, 100% {{ opacity: 0.5; transform: scale(0.85); }}
+    50%      {{ opacity: 1;   transform: scale(1.2); }}
+}}
+.mascot:hover {{
+    transform: translateY(-10px) scale(1.1) rotate(-4deg);
+    filter: drop-shadow(0 12px 16px rgba(255,255,255,0.4));
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -306,7 +348,33 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 tabs = st.tabs(["Jamoa", "Yondashuv", "EDA", "Live Demo", "Natijalar", "Hisobot"])
 
+
+
 # ---- Jamoa ----
+# ---- Card Hover & Soft White Glow CSS ----
+st.markdown("""
+<style>
+/* st.container(border=True) bilan yaratilgan barcha card'lar uchun */
+div[data-testid="stVerticalBlock"] > div[style*="border"], 
+div[data-testid="stBlock"] {
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease !important;
+}
+
+/* Sichqoncha card ustiga borgandagi efekt (Hover) */
+div[data-testid="stVerticalBlock"] > div[style*="border"]:hover, 
+div[data-testid="stBlock"]:hover {
+    /* 1. Card biroz tepaga bo'rtib chiqishi */
+    transform: translateY(-6px) scale(1.005) !important;
+    
+    /* 2. Orqasida yumshoq oq yorug'lik (Glow Shadow) paydo bo'lishi */
+    box-shadow: 0 10px 25px -5px rgba(255, 255, 255, 0.25), 
+                0 0 15px 2px rgba(255, 255, 255, 0.15) !important;
+                
+    /* 3. Chegara liniyasi oq va yorqinroq bo'ladi */
+    border-color: rgba(255, 255, 255, 0.6) !important;
+}
+</style>
+""", unsafe_allow_html=True)
 with tabs[0]:
     st.header("Jamoa")
 
@@ -358,6 +426,7 @@ with tabs[0]:
 
     st.markdown("<br>", unsafe_allow_html=True)
     with st.container(border=True):
+        st.markdown('<div class="mascot-wrap"><span class="mascot">💻</span></div>', unsafe_allow_html=True)
         st.markdown("**Jamoaviy tajriba**")
         st.write(
             "Ilgari CAU (Central Asian University) o'tkazgan Healthcare hackathonida "
