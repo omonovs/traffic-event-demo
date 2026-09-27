@@ -1,0 +1,286 @@
+import os
+import tempfile
+import time
+
+import cv2
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+# ---- MUHIM: haqiqiy model tayyor bo'lganda shu qatorni almashtiring ----
+from solution_stub import detect_events, RiskEstimator, CLASSES
+# from solution import detect_events, RiskEstimator, CLASSES
+# --------------------------------------------------------------------
+
+st.set_page_config(page_title="Traffic Event Detection — NOWL Hackathon", layout="wide")
+
+CLASS_COLORS = {c: px.colors.qualitative.Dark24[i % 24] for i, c in enumerate(CLASSES)}
+
+
+# ---------------------------------------------------------------------------
+# Yordamchi funksiyalar
+# ---------------------------------------------------------------------------
+
+def video_basic_stats(path: str) -> dict:
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    dur = n / fps if fps else 0
+    cap.release()
+    return {"fps": round(fps, 2), "width": w, "height": h,
+            "n_frames": n, "duration_sec": round(dur, 1)}
+
+
+def motion_heatmap(path: str, max_samples: int = 120):
+    """Kadrlar farqi (frame-diff) orqali harakat issiqlik xaritasi."""
+    cap = cv2.VideoCapture(path)
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    step = max(1, n // max_samples)
+    prev = None
+    acc = None
+    idx = 0
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if idx % step == 0:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.resize(gray, (160, 90))
+            if prev is not None:
+                diff = cv2.absdiff(gray, prev)
+                acc = diff.astype(np.float32) if acc is None else acc + diff.astype(np.float32)
+            prev = gray
+        idx += 1
+    cap.release()
+    if acc is None:
+        return None
+    acc = acc / (acc.max() + 1e-6)
+    return acc
+
+
+def timeline_figure(events: list, duration: float):
+    if not events:
+        fig = go.Figure()
+        fig.update_layout(title="Hodisalar topilmadi", xaxis_title="Vaqt (s)")
+        return fig
+    df = pd.DataFrame(events, columns=["start", "end", "label"])
+    fig = px.timeline(
+        df.assign(start_dt=pd.to_datetime(df.start, unit="s"),
+                  end_dt=pd.to_datetime(df.end, unit="s")),
+        x_start="start_dt", x_end="end_dt", y="label", color="label",
+        color_discrete_map=CLASS_COLORS,
+    )
+    fig.update_yaxes(autorange="reversed", title=None)
+    fig.update_xaxes(title="Vaqt")
+    fig.update_layout(showlegend=False, height=80 + 35 * df["label"].nunique())
+    return fig
+
+
+def risk_curve(path: str, sample_every_n: int = 5, max_points: int = 400):
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    est = RiskEstimator()
+    est.reset({"video_id": os.path.basename(path), "fps": fps,
+               "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+               "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), "n_frames": n})
+    ts, scores = [], []
+    idx = 0
+    step = max(1, (n // max_points) if n else sample_every_n)
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if idx % step == 0:
+            t = idx / fps
+            s = est.step(frame, t)
+            ts.append(t)
+            scores.append(s)
+        idx += 1
+    cap.release()
+    return ts, scores
+
+
+# ---------------------------------------------------------------------------
+# Sidebar navigatsiya
+# ---------------------------------------------------------------------------
+
+st.title("🚦 Traffic Event Detection & Accident Anticipation")
+st.caption("NOWL Computer Vision Hackathon · E2A46D42")
+
+tabs = st.tabs(["👥 Jamoa", "🧭 Yondashuv", "📊 EDA", "🎬 Live Demo", "📁 Natijalar", "📝 Hisobot"])
+
+# ---- Jamoa ----
+with tabs[0]:
+    st.header("Jamoa")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.subheader("Ism Familiya")
+        st.write("**Rol:** AI & Pipeline Engineer")
+        st.write("Vazifa: YOLO/ByteTrack, Part A & B mantiqi")
+        st.markdown("[GitHub](#) · [LinkedIn](#)")
+    with col2:
+        st.subheader("Ism Familiya")
+        st.write("**Rol:** Data, Evaluation & Quality Engineer")
+        st.write("Vazifa: Dev-set, evaluate.py, resurslar nazorati, README")
+        st.markdown("[GitHub](#) · [LinkedIn](#)")
+    with col3:
+        st.subheader("Sardor")
+        st.write("**Rol:** Full-Stack Web & Demo Engineer")
+        st.write("Vazifa: Sayt, EDA vizualizatsiyasi, Live Demo")
+        st.markdown("[GitHub](#) · [LinkedIn](#)")
+    st.info("TODO: Har bir a'zoning ismi, real rasmi, portfolio va oldingi loyihalarini qo'shing.")
+
+# ---- Yondashuv ----
+with tabs[1]:
+    st.header("Muammo va Yondashuv")
+    st.markdown("""
+**Pipeline (umumiy chizma):**
+
+`Video → Frame extraction → Object detection (YOLO) → Tracking (ByteTrack) →
+Rule-based event logic (Part A) → Risk scoring (Part B) → predictions.json`
+
+- **Rule-based qismlar:** stopped_vehicle (10s harakatsizlik), wrong_way
+  (harakat vektori tahlili), jaywalking (piyoda-yo'l zonasi kesishishi),
+  congestion (tezlik pasayishi + zichlik).
+- **Learned qismlar:** obyekt detektsiya (YOLOv8x/RT-DETR), tracking (ByteTrack).
+
+TODO: Chizmani rasm/diagram sifatida qo'shing (draw.io yoki excalidraw bilan
+chizib, screenshot qilib joylashtirsangiz bo'ladi). Ishlatilgan datasetlar va
+litsenziyalarini shu yerga yozing.
+    """)
+    st.warning("Bu bo'lim TODO — 1 va 2-ishtirokchi bilan kelishib to'ldiring.")
+
+# ---- EDA ----
+with tabs[2]:
+    st.header("Sample videolar bo'yicha EDA")
+    uploaded = st.file_uploader(
+        "Sample video(lar)ni yuklang (.mp4) — tashkilotchi bergan samples/ papkasidan",
+        type=["mp4"], accept_multiple_files=True, key="eda_upload",
+    )
+    if uploaded:
+        rows = []
+        for f in uploaded:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+                tmp.write(f.read())
+                tmp_path = tmp.name
+            stats = video_basic_stats(tmp_path)
+            stats["name"] = f.name
+            rows.append(stats)
+
+            with st.expander(f"🎞 {f.name} — harakat issiqlik xaritasi"):
+                heat = motion_heatmap(tmp_path)
+                if heat is not None:
+                    fig = px.imshow(heat, color_continuous_scale="inferno",
+                                     labels=dict(color="Harakat intensivligi"))
+                    fig.update_layout(height=300, margin=dict(l=0, r=0, t=20, b=0))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.write("Videoda kadr topilmadi.")
+            os.unlink(tmp_path)
+
+        df = pd.DataFrame(rows)[["name", "fps", "width", "height", "n_frames", "duration_sec"]]
+        st.subheader("Video statistikasi")
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("EDA uchun bir nechta sample videoni shu yerga yuklang.")
+
+    st.markdown("""
+**TODO (topilmalar shu yerga yoziladi):**
+- Yorug'lik sharoiti (kun/tun, soya)
+- Vaqt bo'yicha obyektlar soni (mashina/piyoda) grafigi
+- Yo'l yo'nalishlari va traektoriyalar xaritasi
+- Traffic zichligi vaqt bo'yicha
+    """)
+
+# ---- Live Demo ----
+with tabs[3]:
+    st.header("Live Demo")
+    st.caption("Video yuklang (≤ 2 daqiqa tavsiya etiladi) — model hodisalarni va xavf darajasini aniqlaydi.")
+    demo_file = st.file_uploader("Video (.mp4)", type=["mp4"], key="demo_upload")
+
+    if demo_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            tmp.write(demo_file.read())
+            video_path = tmp.name
+
+        st.video(demo_file)
+
+        progress = st.empty()
+        progress.info("⏳ Hodisalar aniqlanmoqda (Part A)...")
+        t0 = time.time()
+        events = detect_events(video_path)
+        t1 = time.time()
+        progress.success(f"✅ {len(events)} ta hodisa topildi ({t1 - t0:.1f}s)")
+
+        stats = video_basic_stats(video_path)
+        duration = stats["duration_sec"]
+
+        st.subheader("Hodisalar jadvali")
+        if events:
+            ev_df = pd.DataFrame(events, columns=["Boshlanish (s)", "Tugash (s)", "Sinf"])
+            st.dataframe(ev_df, use_container_width=True)
+        else:
+            st.write("Hodisa topilmadi.")
+
+        st.subheader("Vaqt chizig'i (timeline)")
+        st.plotly_chart(timeline_figure(events, duration), use_container_width=True)
+
+        st.subheader("Xavf grafigi (Risk curve, Part B)")
+        with st.spinner("Risk hisoblanmoqda..."):
+            ts, scores = risk_curve(video_path)
+        risk_fig = go.Figure()
+        risk_fig.add_trace(go.Scatter(x=ts, y=scores, mode="lines", name="Risk"))
+        risk_fig.add_hline(y=0.5, line_dash="dash", line_color="red",
+                            annotation_text="θ = 0.5 (alarm chegarasi)")
+        risk_fig.update_layout(xaxis_title="Vaqt (s)", yaxis_title="P(avariya ≤ 5s ichida)",
+                                yaxis_range=[0, 1], height=350)
+        st.plotly_chart(risk_fig, use_container_width=True)
+
+        os.unlink(video_path)
+    else:
+        st.info("Demo uchun video yuklang.")
+
+# ---- Natijalar ----
+with tabs[4]:
+    st.header("Sample videolar bo'yicha natijalar")
+    st.info("""
+TODO: Har bir sample video uchun:
+- Annotatsiya qilingan video (bbox + label chizilgan)
+- Event timeline
+- Risk curve (agar Part B qo'shilgan bo'lsa)
+- Har bir sinf uchun kamida bitta misol
+- Halol failure case (model xato qilgan holatlar)
+
+Eng oson yo'l: "Live Demo" tabidagi kodni skriptga aylantirib, barcha sample
+videolarni oldindan qayta ishlab, natijalarni shu sahifada statik ko'rsatish
+(sayt tezroq ochilishi uchun — real vaqtda qayta hisoblamang).
+    """)
+
+# ---- Hisobot ----
+with tabs[5]:
+    st.header("Texnik hisobot (1 sahifa)")
+    st.markdown("""
+**Nima ishladi:**
+- TODO
+
+**Nima ishlamadi / qiyinchiliklar:**
+- TODO
+
+**Keyingi qadamlar (agar davom etsa):**
+- TODO
+
+**Havolalar:**
+- Repository: TODO
+- Weights: TODO
+- predictions_samples.json: TODO
+    """)
+
+st.divider()
+st.caption("⚠️ Bu sahifa hozircha STUB model (`solution_stub.py`) bilan ishlayapti — "
+           "1-ishtirokchining haqiqiy solution.py tayyor bo'lgach, app.py dagi import "
+           "qatorini almashtiring.")
