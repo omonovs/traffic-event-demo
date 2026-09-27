@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import glob
 
 # ---- MUHIM: haqiqiy model tayyor bo'lganda shu qatorni almashtiring ----
 from solution_stub import detect_events, RiskEstimator, CLASSES
@@ -277,20 +278,101 @@ with tabs[3]:
         st.info("Demo uchun video yuklang.")
 
 # ---- Natijalar ----
+# ============================================================================
+# APP.PY GA O'ZGARTIRISH QO'LLANMASI
+#
+# 1) app.py boshidagi importlar qatoriga (boshqa importlardan keyin) qo'shing:
+#      import glob
+#
+# 2) app.py dagi eski "Natijalar" blokini (with tabs[4]: ... st.info("""TODO...""")
+#    qismini) TO'LIQ o'chirib, o'rniga pastdagi blokni qo'ying.
+# ============================================================================
+
 with tabs[4]:
     st.header("Sample videolar bo'yicha natijalar")
-    st.info("""
-TODO: Har bir sample video uchun:
-- Annotatsiya qilingan video (bbox + label chizilgan)
-- Event timeline
-- Risk curve (agar Part B qo'shilgan bo'lsa)
-- Har bir sinf uchun kamida bitta misol
-- Halol failure case (model xato qilgan holatlar)
+    st.caption(
+        "Har bir sample video oldindan `precompute_results.py` skripti bilan "
+        "qayta ishlangan — hakamlar hech narsa yuklamasdan natijalarni ko'radi."
+    )
 
-Eng oson yo'l: "Live Demo" tabidagi kodni skriptga aylantirib, barcha sample
-videolarni oldindan qayta ishlab, natijalarni shu sahifada statik ko'rsatish
-(sayt tezroq ochilishi uchun — real vaqtda qayta hisoblamang).
-    """)
+    RESULTS_DIR = os.path.join("assets", "results")
+    result_files = sorted(glob.glob(os.path.join(RESULTS_DIR, "*.json")))
+
+    if not result_files:
+        st.warning(
+            "Natijalar hali generatsiya qilinmagan. Terminalda quyidagini ishga "
+            "tushiring:\n\n`python precompute_results.py`\n\nSo'ng `assets/results/` "
+            "papkasini va `predictions_samples.json` faylini push qiling."
+        )
+    else:
+        st.info(
+            "⚠️ Quyidagi natijalar hozircha **stub model** bilan olingan. "
+            "1-ishtirokchining haqiqiy `solution.py` fayli tayyor bo'lgach, "
+            "`precompute_results.py` qayta ishga tushiriladi va bu sahifa "
+            "avtomatik yangi (haqiqiy) natijalarni ko'rsatadi.",
+            icon="⚠️",
+        )
+
+        video_names = []
+        for fp in result_files:
+            with open(fp, "r", encoding="utf-8") as f:
+                video_names.append((fp, json.load(f)))
+
+        pick = st.selectbox(
+            "Sample videoni tanlang",
+            options=list(range(len(video_names))),
+            format_func=lambda i: video_names[i][1]["name"],
+        )
+        fp, data = video_names[pick]
+
+        col_left, col_right = st.columns([3, 2])
+
+        with col_left:
+            annotated_name = data.get("annotated_video")
+            annotated_path = os.path.join(RESULTS_DIR, annotated_name) if annotated_name else None
+            if annotated_path and os.path.exists(annotated_path):
+                st.video(annotated_path)
+            else:
+                st.warning("Annotatsiyalangan video topilmadi.")
+
+        with col_right:
+            st.metric("Davomiyligi", f"{data['duration_sec']} s")
+            st.metric("FPS", data["fps"])
+            st.metric("Topilgan hodisalar", len(data["events"]))
+            max_risk = max((r[1] for r in data["risk"]), default=0.0)
+            st.metric("Eng yuqori risk", f"{max_risk:.2f}")
+
+        st.subheader("Hodisalar jadvali")
+        if data["events"]:
+            ev_df = pd.DataFrame(data["events"], columns=["Boshlanish (s)", "Tugash (s)", "Sinf"])
+            st.dataframe(ev_df, use_container_width=True)
+        else:
+            st.write("Hodisa topilmadi.")
+
+        st.subheader("Vaqt chizig'i (timeline)")
+        st.plotly_chart(timeline_figure(data["events"], data["duration_sec"]), use_container_width=True)
+
+        st.subheader("Xavf grafigi (Risk curve, Part B)")
+        ts = [r[0] for r in data["risk"]]
+        scores = [r[1] for r in data["risk"]]
+        risk_fig = go.Figure()
+        risk_fig.add_trace(go.Scatter(x=ts, y=scores, mode="lines", name="Risk"))
+        risk_fig.add_hline(y=0.5, line_dash="dash", line_color="red",
+                            annotation_text="θ = 0.5 (alarm chegarasi)")
+        risk_fig.update_layout(xaxis_title="Vaqt (s)", yaxis_title="P(avariya ≤ 5s ichida)",
+                                yaxis_range=[0, 1], height=350)
+        st.plotly_chart(risk_fig, use_container_width=True)
+
+        with st.expander("📉 Halol failure case / cheklovlar"):
+            st.markdown(
+                "- Hozircha stub model — hodisalar tasodifiy generatsiya qilingan, "
+                "haqiqiy detektsiya emas.\n"
+                "- Haqiqiy model ulanganda bu yerga: model xato qilgan aniq holatlar "
+                "(masalan noto'g'ri sinf, o'tkazib yuborilgan hodisa) yoziladi."
+            )
+
+        st.divider()
+        st.caption(f"Barcha {len(result_files)} ta sample video uchun natijalar tayyor.")
 
 # ---- Hisobot ----
 with tabs[5]:
