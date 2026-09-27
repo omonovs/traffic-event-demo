@@ -770,13 +770,9 @@ with tabs[5]:
     with st.container(border=True):
         st.markdown("**Havolalar**")
         st.markdown(
-            "- Repository: [GitHub repo havolasini shu yerga qo'ying](https://github.com/REPO-NOMI)\n"
-            "- Weights: [weights/ papkasi yoki download.sh havolasi](https://github.com/REPO-NOMI/tree/main/weights)\n"
-            "- predictions_samples.json: [repo ichidagi havola](https://github.com/REPO-NOMI/blob/main/predictions_samples.json)"
-        )
-        st.caption(
-            "⚠️ Yuqoridagi 3 ta havolani rasmiy submission repo tayyor "
-            "bo'lgach, haqiqiy URL bilan almashtiring."
+            "- Repository: [github.com/omonovs/traffic-event-demo](https://github.com/omonovs/traffic-event-demo)\n"
+            "- Weights: [wiut_cv_scripts/yolo11n.pt](https://github.com/omonovs/traffic-event-demo/blob/main/wiut_cv_scripts/yolo11n.pt)\n"
+            "- predictions_samples.json: [predictions_samples.json](https://github.com/omonovs/traffic-event-demo/blob/main/predictions_samples.json)"
         )
 
 st.divider()
