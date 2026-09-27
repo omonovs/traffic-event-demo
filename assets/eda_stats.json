@@ -1,0 +1,38 @@
+[
+  {
+    "fps": 30.0,
+    "width": 1920,
+    "height": 1080,
+    "n_frames": 625,
+    "duration_sec": 20.8,
+    "name": "Video Project 1 .mp4",
+    "heatmap_file": "Video_Project_1__mp4_heatmap.png"
+  },
+  {
+    "fps": 30.0,
+    "width": 1920,
+    "height": 1080,
+    "n_frames": 921,
+    "duration_sec": 30.7,
+    "name": "Video Project 2 .mp4",
+    "heatmap_file": "Video_Project_2__mp4_heatmap.png"
+  },
+  {
+    "fps": 30.0,
+    "width": 1920,
+    "height": 1080,
+    "n_frames": 914,
+    "duration_sec": 30.5,
+    "name": "Video Project 3 .mp4",
+    "heatmap_file": "Video_Project_3__mp4_heatmap.png"
+  },
+  {
+    "fps": 30.0,
+    "width": 1920,
+    "height": 1080,
+    "n_frames": 922,
+    "duration_sec": 30.7,
+    "name": "Video Project 4 .mp4",
+    "heatmap_file": "Video_Project_4__mp4_heatmap.png"
+  }
+]

@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -158,8 +159,38 @@ litsenziyalarini shu yerga yozing.
 # ---- EDA ----
 with tabs[2]:
     st.header("Sample videolar bo'yicha EDA")
+
+    # --- Oldindan hisoblangan (statik) natijalar — hech narsa yuklamasdan ko'rinadi ---
+    eda_json_path = os.path.join("assets", "eda_stats.json")
+    if os.path.exists(eda_json_path):
+        with open(eda_json_path, "r", encoding="utf-8") as f:
+            precomputed = json.load(f)
+        st.subheader("Sample videolar statistikasi")
+        pre_df = pd.DataFrame(precomputed)[
+            ["name", "fps", "width", "height", "n_frames", "duration_sec"]
+        ]
+        st.dataframe(pre_df, use_container_width=True)
+
+        st.subheader("Harakat issiqlik xaritalari")
+        cols = st.columns(2)
+        for i, row in enumerate(precomputed):
+            hm = row.get("heatmap_file")
+            if hm:
+                hm_path = os.path.join("assets", "heatmaps", hm)
+                if os.path.exists(hm_path):
+                    with cols[i % 2]:
+                        st.image(hm_path, caption=row["name"], use_container_width=True)
+        st.divider()
+    else:
+        st.info(
+            "Statik EDA natijalari hali generatsiya qilinmagan. "
+            "`python precompute_eda.py` skriptini ishga tushiring."
+        )
+
+    # --- Interaktiv qism: tashrif buyuruvchi o'z videosini yuklab ko'rishi mumkin ---
+    st.subheader("O'zingiz sinab ko'ring")
     uploaded = st.file_uploader(
-        "Sample video(lar)ni yuklang (.mp4) — tashkilotchi bergan samples/ papkasidan",
+        "Istalgan video yuklang (.mp4) — tahlil shu yerda ko'rsatiladi",
         type=["mp4"], accept_multiple_files=True, key="eda_upload",
     )
     if uploaded:
