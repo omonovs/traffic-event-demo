@@ -30,11 +30,12 @@ import cv2
 import numpy as np
 
 # ---- MUHIM: haqiqiy model tayyor bo'lganda shu qatorni almashtiring ----
-from solution_stub import detect_events, RiskEstimator, CLASSES
+sys.path.insert(0, "wiut_cv_scripts")
+from solution import detect_events, RiskEstimator, CLASSES
 # from solution import detect_events, RiskEstimator, CLASSES
 # --------------------------------------------------------------------
 
-TEAM_NAME = "omonovs"
+TEAM_NAME = "NOWL"
 
 SAMPLES_DIR = "samples"
 ASSETS_DIR = "assets"

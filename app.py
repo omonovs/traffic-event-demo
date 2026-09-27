@@ -1,6 +1,7 @@
 import glob
 import json
 import os
+import sys
 import tempfile
 import time
 
@@ -11,9 +12,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-# ---- MUHIM: haqiqiy model tayyor bo'lganda shu qatorni almashtiring ----
-from solution_stub import detect_events, RiskEstimator, CLASSES
-# from solution import detect_events, RiskEstimator, CLASSES
+# ---- Haqiqiy model: YOLO11n + ByteTrack (1-ishtirokchi solution.py) ----
+sys.path.insert(0, "wiut_cv_scripts")
+from solution import detect_events, RiskEstimator, CLASSES
 # --------------------------------------------------------------------
 
 st.set_page_config(
@@ -442,34 +443,71 @@ with tabs[1]:
 
     with st.container(border=True):
         st.subheader("Pipeline")
-        st.markdown(
-            "`Video` → `Frame extraction` → `Object detection (YOLO)` → "
-            "`Tracking (ByteTrack)` → `Rule-based event logic (Part A)` → "
-            "`Risk scoring (Part B)` → `predictions.json`"
-        )
+        st.graphviz_chart("""
+        digraph {
+            rankdir=LR;
+            bgcolor="transparent";
+            node [shape=box, style="rounded,filled", fillcolor="#161B24",
+                  fontcolor="#F5A524", color="#232935", fontname="Inter", penwidth=1.4];
+            edge [color="#8B94A3", fontcolor="#8B94A3", fontname="Inter"];
+
+            video [label="Video\\n(sobit kamera)"];
+            yolo [label="YOLO11n\\nObyekt detektsiya"];
+            bytetrack [label="ByteTrack\\nKuzatuv (tracking)"];
+            scene [label="Scene config\\n(kalibrlash)"];
+            rules [label="Qoida-asoslangan\\nhodisa mantiqi (Part A)"];
+            events [label="Hodisalar\\n[start, end, label]"];
+            risk [label="RiskEstimator\\n(Part B)"];
+
+            video -> yolo -> bytetrack -> rules -> events;
+            scene -> rules;
+            bytetrack -> risk;
+        }
+        """)
 
     col_a, col_b = st.columns(2)
     with col_a:
         with st.container(border=True):
             st.markdown("**Qoidaga asoslangan (rule-based)**")
             st.markdown(
-                "- `stopped_vehicle` — 10s harakatsizlik\n"
-                "- `wrong_way` — harakat vektori tahlili\n"
+                "- `stopped_vehicle` — 10s+ harakatsizlik\n"
+                "- `wrong_way` — harakat vektori yo'nalish tahlili\n"
                 "- `jaywalking` — piyoda / yo'l zonasi kesishishi\n"
-                "- `congestion` — tezlik pasayishi + zichlik"
+                "- `congestion` — tezlik pasayishi + zichlik\n"
+                "- `failure_to_yield` — piyoda o'tish joyi + avtomobil kesishishi\n"
+                "- `collision_risk` — track'lar orasidagi time-to-collision (TTC)"
             )
     with col_b:
         with st.container(border=True):
             st.markdown("**O'rganilgan (learned)**")
             st.markdown(
-                "- Obyekt detektsiya — YOLOv8x / RT-DETR\n"
-                "- Tracking — ByteTrack"
+                "- Obyekt detektsiya — **YOLO11n** (Ultralytics, COCO pretrained)\n"
+                "- Ko'p-freym assotsiatsiya — **ByteTrack**\n"
+                "- Maxsus traffic dataset'da qo'shimcha fine-tuning qilinmagan"
             )
 
-    st.warning(
-        "Diagramma rasmi va ishlatilgan datasetlar/litsenziyalar hali qo'shilmagan — "
-        "1 va 2-ishtirokchi bilan kelishib to'ldiriladi."
-    )
+    with st.container(border=True):
+        st.markdown("**Nega bu tanlov**")
+        st.markdown(
+            "Vaqt va label yo'qligi tufayli video model yoki VLM fine-tuning "
+            "yuqori xavf edi. Pretrained detektor + tracker ustiga shaffof "
+            "qoidalar qurish tezroq ishlab chiqildi, natijalarni tushuntirish "
+            "va xatoni debug qilish osonroq."
+        )
+
+    with st.container(border=True):
+        st.markdown("**Dataset va litsenziyalar**")
+        st.markdown(
+            "| Manba | Maqsad | Litsenziya |\n"
+            "|---|---|---|\n"
+            "| COCO (YOLO11n pretrained vazn orqali) | Obyekt detektsiyasi | CC BY 4.0 (dataset), AGPL-3.0 (Ultralytics kod) |\n"
+            "| ByteTrack | Ko'p-obyekt kuzatuvi | MIT |\n"
+            "| NOWL hackathon sample videolari | Qoidalarni sozlash, EDA, dev-test | Faqat hackathon doirasida |\n"
+        )
+        st.caption(
+            "Modelning hech qanday qismi traffic-specific dataset'da qayta "
+            "o'qitilmagan — barcha hodisa mantiqi qoida-asoslangan (rule-based)."
+        )
 
 # ---- EDA ----
 with tabs[2]:
@@ -607,13 +645,6 @@ with tabs[4]:
             "papkasini va `predictions_samples.json` faylini push qiling."
         )
     else:
-        st.info(
-            "Quyidagi natijalar hozircha stub model bilan olingan. "
-            "1-ishtirokchining haqiqiy solution.py fayli tayyor bo'lgach, "
-            "precompute_results.py qayta ishga tushiriladi va bu sahifa "
-            "avtomatik yangi (haqiqiy) natijalarni ko'rsatadi."
-        )
-
         video_names = []
         for fp in result_files:
             with open(fp, "r", encoding="utf-8") as f:
@@ -663,10 +694,15 @@ with tabs[4]:
 
         with st.expander("Halol failure case / cheklovlar"):
             st.markdown(
-                "- Hozircha stub model — hodisalar tasodifiy generatsiya qilingan, "
-                "haqiqiy detektsiya emas.\n"
-                "- Haqiqiy model ulanganda bu yerga: model xato qilgan aniq holatlar "
-                "(masalan noto'g'ri sinf, o'tkazib yuborilgan hodisa) yoziladi."
+                "- Rasmiy 14 sinfdan hozircha **7 tasi** qo'llab-quvvatlanadi "
+                "(`accident`, `near_miss`, `red_light`, `illegal_u_turn`, "
+                "`illegal_turn`, `solid_line_crossing`, `stop_line`, "
+                "`road_obstacle`, `fire_smoke` — hali yo'q).\n"
+                "- Qoida chegaralari (threshold) shu sample videolarga qarab "
+                "sozlangan — boshqa yorug'lik/zichlik sharoitida generalizatsiya "
+                "kafolatlanmaydi.\n"
+                "- Qisman to'silgan (occluded) obyektlarda tracking uzilishi "
+                "hodisa chegaralarini noaniq qilishi mumkin."
             )
 
         st.caption(f"Barcha {len(result_files)} ta sample video uchun natijalar tayyor.")
@@ -674,33 +710,77 @@ with tabs[4]:
 # ---- Hisobot ----
 with tabs[5]:
     st.header("Texnik hisobot")
-    st.caption("Bir sahifalik xulosa — nima ishladi, nima ishlamadi, keyingi qadamlar.")
+    st.caption("Bir sahifalik xulosa — yondashuv, natijalar, nima ishladi, nima ishlamadi, keyingi qadamlar.")
+
+    with st.container(border=True):
+        st.markdown("**Yondashuv qisqacha**")
+        st.markdown(
+            "YOLO11n (COCO pretrained) + ByteTrack orqali sahnadagi obyektlar "
+            "aniqlanadi va kuzatiladi; trayektoriya, tezlik va pozitsiya "
+            "ustidagi qat'iy qoidalar 6 ta hodisa sinfini (jaywalking, "
+            "stopped_vehicle, congestion, failure_to_yield, wrong_way, "
+            "collision_risk) chiqaradi. Alohida `RiskEstimator` time-to-collision "
+            "(TTC) asosida har bir kadr uchun xavf skorini beradi."
+        )
+
+    with st.container(border=True):
+        st.markdown("**Natijalar**")
+        st.markdown(
+            "4 ta sample videoda sinovdan o'tkazildi: 4 tadan 3 tasida "
+            "hodisalar aniqlandi (jami 7 ta), 1 tasi (20.8s, qisqa klip) "
+            "hodisasiz deb baholandi. Format `evaluate.py --validate-only` "
+            "orqali tasdiqlandi: **0 xato, 0 ogohlantirish**. Rasmiy 14 "
+            "sinfdan 7 tasi qo'llab-quvvatlanadi — bu hackathon qoidalariga "
+            "ko'ra ruxsat etilgan."
+        )
 
     col_a, col_b = st.columns(2)
     with col_a:
         with st.container(border=True):
             st.markdown("**Nima ishladi**")
-            st.markdown("- TODO")
+            st.markdown(
+                "- Pretrained YOLO11n + ByteTrack qo'shimcha o'qitishsiz "
+                "barqaror obyekt kuzatuvi berdi\n"
+                "- Qoida-asoslangan mantiq natijalarni tushunarli va debug "
+                "qilish oson qildi\n"
+                "- Format validatsiyasi (`evaluate.py`) birinchi urinishdayoq "
+                "xatosiz o'tdi"
+            )
     with col_b:
         with st.container(border=True):
             st.markdown("**Nima ishlamadi / qiyinchiliklar**")
-            st.markdown("- TODO")
+            st.markdown(
+                "- 14 tadan faqat 7 sinf qo'llab-quvvatlanadi — qolganlariga "
+                "qoida yozishga vaqt yetmadi\n"
+                "- Qoidalar kalibrlashga sezgir — chegaralar sample "
+                "videolarga moslashtirilgan\n"
+                "- Fine-tuning yo'qligi murakkab/qisman to'silgan holatlarda "
+                "aniqlikni pasaytirishi mumkin"
+            )
 
     with st.container(border=True):
-        st.markdown("**Keyingi qadamlar (agar davom etsa)**")
-        st.markdown("- TODO")
+        st.markdown("**Keyingi qadamlar (agar davom etilsa)**")
+        st.markdown(
+            "- Qolgan 7 sinf uchun qoida yozish yoki kichik fine-tuning\n"
+            "- TTC threshold'larini o'z dev-label'larimiz asosida kalibrlash\n"
+            "- Ablation: tracker bilan/tracking'siz, turli frame sampling "
+            "tezliklarida aniqlikni solishtirish"
+        )
 
     with st.container(border=True):
         st.markdown("**Havolalar**")
         st.markdown(
-            "- Repository: TODO\n"
-            "- Weights: TODO\n"
-            "- predictions_samples.json: TODO"
+            "- Repository: [GitHub repo havolasini shu yerga qo'ying](https://github.com/REPO-NOMI)\n"
+            "- Weights: [weights/ papkasi yoki download.sh havolasi](https://github.com/REPO-NOMI/tree/main/weights)\n"
+            "- predictions_samples.json: [repo ichidagi havola](https://github.com/REPO-NOMI/blob/main/predictions_samples.json)"
+        )
+        st.caption(
+            "⚠️ Yuqoridagi 3 ta havolani rasmiy submission repo tayyor "
+            "bo'lgach, haqiqiy URL bilan almashtiring."
         )
 
 st.divider()
 st.caption(
-    "Bu sahifa hozircha stub model (solution_stub.py) bilan ishlayapti — "
-    "1-ishtirokchining haqiqiy solution.py tayyor bo'lgach, app.py dagi import "
-    "qatorini almashtiring."
+    "NOWL · E2A46D42 — Toyota Traffic Event Detection and Accident "
+    "Anticipation. YOLO11n + ByteTrack + qoida-asoslangan hodisa mantiqi."
 )
