@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import tempfile
@@ -9,16 +10,178 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import glob
 
 # ---- MUHIM: haqiqiy model tayyor bo'lganda shu qatorni almashtiring ----
 from solution_stub import detect_events, RiskEstimator, CLASSES
 # from solution import detect_events, RiskEstimator, CLASSES
 # --------------------------------------------------------------------
 
-st.set_page_config(page_title="Traffic Event Detection — NOWL Hackathon", layout="wide")
+st.set_page_config(
+    page_title="Traffic Event Detection — NOWL Hackathon",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-CLASS_COLORS = {c: px.colors.qualitative.Dark24[i % 24] for i, c in enumerate(CLASSES)}
+# ---------------------------------------------------------------------------
+# Dizayn tokenlari
+# ---------------------------------------------------------------------------
+
+BG = "#0A0D12"
+PANEL = "#12161D"
+PANEL_2 = "#161B24"
+BORDER = "#232935"
+TEXT = "#E7EAEE"
+MUTED = "#8B94A3"
+ACCENT = "#F5A524"      # amber — svetofor rangi
+ACCENT_2 = "#4C8DFF"    # ko'k — ikkilamchi
+DANGER = "#EF4444"
+SUCCESS = "#22C55E"
+
+# 14 rasmiy sinf uchun barqaror, qasddan tanlangan rang spektri
+CLASS_PALETTE = [
+    "#EF4444", "#F97316", "#F5A524", "#EAB308", "#84CC16",
+    "#22C55E", "#14B8A6", "#06B6D4", "#4C8DFF", "#6366F1",
+    "#8B5CF6", "#D946EF", "#EC4899", "#F43F5E",
+]
+CLASS_COLORS = {c: CLASS_PALETTE[i % len(CLASS_PALETTE)] for i, c in enumerate(CLASSES)}
+
+PLOTLY_FONT = dict(family="Inter, sans-serif", color=TEXT)
+
+
+def style_fig(fig, height=None):
+    fig.update_layout(
+        paper_bgcolor=PANEL,
+        plot_bgcolor=PANEL,
+        font=PLOTLY_FONT,
+        margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(bgcolor="rgba(0,0,0,0)"),
+    )
+    fig.update_xaxes(gridcolor=BORDER, zerolinecolor=BORDER)
+    fig.update_yaxes(gridcolor=BORDER, zerolinecolor=BORDER)
+    if height:
+        fig.update_layout(height=height)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Global CSS
+# ---------------------------------------------------------------------------
+
+st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] {{
+    font-family: 'Inter', sans-serif;
+}}
+h1, h2, h3, h4 {{
+    font-family: 'Space Grotesk', sans-serif !important;
+    letter-spacing: -0.01em;
+}}
+code, .mono {{
+    font-family: 'JetBrains Mono', monospace !important;
+}}
+
+.stApp {{
+    background: {BG};
+    color: {TEXT};
+}}
+
+/* Tabs */
+[data-testid="stTabs"] button {{
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    color: {MUTED};
+}}
+[data-testid="stTabs"] button[aria-selected="true"] {{
+    color: {TEXT};
+}}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"] {{
+    background-color: {ACCENT} !important;
+}}
+[data-testid="stTabs"] [data-baseweb="tab-border"] {{
+    background-color: {BORDER};
+}}
+
+/* Bordered containers -> cards */
+[data-testid="stVerticalBlockBorderWrapper"] {{
+    background: {PANEL};
+    border: 1px solid {BORDER} !important;
+    border-radius: 10px;
+}}
+
+/* Metrics */
+[data-testid="stMetric"] {{
+    background: {PANEL_2};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 12px 16px;
+}}
+[data-testid="stMetricLabel"] {{
+    color: {MUTED};
+}}
+[data-testid="stMetricValue"] {{
+    font-family: 'JetBrains Mono', monospace;
+    color: {TEXT};
+}}
+
+/* Alerts */
+.stAlert {{
+    border-radius: 8px;
+    border: 1px solid {BORDER};
+}}
+
+/* Dataframe */
+[data-testid="stDataFrame"] {{
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    overflow: hidden;
+}}
+
+/* File uploader */
+[data-testid="stFileUploaderDropzone"] {{
+    background: {PANEL_2};
+    border: 1px dashed {BORDER};
+    border-radius: 8px;
+}}
+
+/* Buttons / select */
+.stSelectbox [data-baseweb="select"] {{
+    border-radius: 8px;
+}}
+
+/* Divider */
+hr {{
+    border-color: {BORDER};
+}}
+
+.pill {{
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: rgba(245, 165, 36, 0.12);
+    color: {ACCENT};
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    border: 1px solid rgba(245, 165, 36, 0.35);
+}}
+.pill-muted {{
+    background: rgba(139, 148, 163, 0.12);
+    color: {MUTED};
+    border-color: {BORDER};
+}}
+.hero-title {{
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 2px;
+}}
+.hero-sub {{
+    color: {MUTED};
+    font-size: 0.95rem;
+    margin-bottom: 0;
+}}
+</style>
+""", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +231,7 @@ def timeline_figure(events: list, duration: float):
     if not events:
         fig = go.Figure()
         fig.update_layout(title="Hodisalar topilmadi", xaxis_title="Vaqt (s)")
-        return fig
+        return style_fig(fig, height=120)
     df = pd.DataFrame(events, columns=["start", "end", "label"])
     fig = px.timeline(
         df.assign(start_dt=pd.to_datetime(df.start, unit="s"),
@@ -79,7 +242,22 @@ def timeline_figure(events: list, duration: float):
     fig.update_yaxes(autorange="reversed", title=None)
     fig.update_xaxes(title="Vaqt")
     fig.update_layout(showlegend=False, height=80 + 35 * df["label"].nunique())
-    return fig
+    return style_fig(fig)
+
+
+def risk_figure(ts, scores):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=ts, y=scores, mode="lines", name="Risk",
+        line=dict(color=ACCENT_2, width=2),
+        fill="tozeroy", fillcolor="rgba(76,141,255,0.08)",
+    ))
+    fig.add_hline(y=0.5, line_dash="dash", line_color=DANGER,
+                  annotation_text="θ = 0.5 (alarm chegarasi)",
+                  annotation_font_color=DANGER)
+    fig.update_layout(xaxis_title="Vaqt (s)", yaxis_title="P(avariya ≤ 5s ichida)",
+                       yaxis_range=[0, 1])
+    return style_fig(fig, height=320)
 
 
 def risk_curve(path: str, sample_every_n: int = 5, max_points: int = 400):
@@ -108,70 +286,139 @@ def risk_curve(path: str, sample_every_n: int = 5, max_points: int = 400):
 
 
 # ---------------------------------------------------------------------------
-# Sidebar navigatsiya
+# Header
 # ---------------------------------------------------------------------------
 
-st.title("🚦 Traffic Event Detection & Accident Anticipation")
-st.caption("NOWL Computer Vision Hackathon · E2A46D42")
+head_l, head_r = st.columns([4, 1])
+with head_l:
+    st.markdown('<div class="hero-title">Traffic Event Detection &amp; Accident Anticipation</div>',
+                unsafe_allow_html=True)
+    st.markdown('<p class="hero-sub">Fixed road camera · event detection and accident anticipation</p>',
+                unsafe_allow_html=True)
+with head_r:
+    st.markdown(
+        '<div style="text-align:right; padding-top:14px;">'
+        '<span class="pill">NOWL · E2A46D42</span></div>',
+        unsafe_allow_html=True,
+    )
 
-tabs = st.tabs(["👥 Jamoa", "🧭 Yondashuv", "📊 EDA", "🎬 Live Demo", "📁 Natijalar", "📝 Hisobot"])
+st.markdown("<br>", unsafe_allow_html=True)
+
+tabs = st.tabs(["Jamoa", "Yondashuv", "EDA", "Live Demo", "Natijalar", "Hisobot"])
 
 # ---- Jamoa ----
 with tabs[0]:
     st.header("Jamoa")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.subheader("Ism Familiya")
-        st.write("**Rol:** AI & Pipeline Engineer")
-        st.write("Vazifa: YOLO/ByteTrack, Part A & B mantiqi")
-        st.markdown("[GitHub](#) · [LinkedIn](#)")
-    with col2:
-        st.subheader("Ism Familiya")
-        st.write("**Rol:** Data, Evaluation & Quality Engineer")
-        st.write("Vazifa: Dev-set, evaluate.py, resurslar nazorati, README")
-        st.markdown("[GitHub](#) · [LinkedIn](#)")
-    with col3:
-        st.subheader("Sardor")
-        st.write("**Rol:** Full-Stack Web & Demo Engineer")
-        st.write("Vazifa: Sayt, EDA vizualizatsiyasi, Live Demo")
-        st.markdown("[GitHub](#) · [LinkedIn](#)")
-    st.info("TODO: Har bir a'zoning ismi, real rasmi, portfolio va oldingi loyihalarini qo'shing.")
+
+    TEAM = [
+        {
+            "name": "Anvar Mexmonov",
+            "role": "AI & Pipeline Engineer",
+            "task": "YOLO/ByteTrack integratsiyasi, Part A (hodisa qoidalari) va Part B (RiskEstimator) mantiqi",
+            "github": "https://github.com/anvarmexmonov",
+            "linkedin": "https://www.linkedin.com/in/anvar-mexmonov",
+            "prev_project": "",
+        },
+        {
+            "name": "Sirojiddin Abduraxmonov",
+            "role": "Data, Evaluation & Quality Engineer",
+            "task": "DevSet (ground_truth_dev.json) tayyorlash, evaluate.py orqali sifat nazorati, vaqt/resurs cheklovlariga moslik, repo/README",
+            "github": "https://github.com/sityuz",
+            "linkedin": "https://www.linkedin.com/in/sirojiddin-abduraxmonov-81474a363",
+            "prev_project": "",
+        },
+        {
+            "name": "Sardor Omonov",
+            "role": "Full-Stack Web & Demo Engineer",
+            "task": "Jamoa websayti, EDA vizualizatsiyasi, Live Demo va Natijalar sahifalari",
+            "github": "https://github.com/omonovs",
+            "linkedin": "https://www.linkedin.com/in/sardor-omonov-b5139338a",
+            "prev_project": "",
+        },
+    ]
+
+    cols = st.columns(3)
+    for col, member in zip(cols, TEAM):
+        with col:
+            with st.container(border=True):
+                st.markdown(f"**{member['name']}**")
+                st.markdown(f'<span class="pill pill-muted">{member["role"]}</span>',
+                            unsafe_allow_html=True)
+                st.markdown(f"<div style='color:{MUTED}; font-size:0.9rem; margin-top:8px;'>"
+                            f"{member['task']}</div>", unsafe_allow_html=True)
+                links = []
+                if member.get("github"):
+                    links.append(f"[GitHub]({member['github']})")
+                if member.get("linkedin"):
+                    links.append(f"[LinkedIn]({member['linkedin']})")
+                if links:
+                    st.markdown(" · ".join(links))
+                if member.get("prev_project"):
+                    st.caption(f"Oldingi loyiha: {member['prev_project']}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown("**Jamoaviy tajriba**")
+        st.write(
+            "Ilgari CAU (Central Asian University) o'tkazgan Healthcare hackathonida "
+            "ishtirokchi bo'lganmiz, shuningdek TUIT ichki hackathonlarida 2 marta "
+            "qatnashganmiz (g'olib bo'lmagan bo'lsak ham, tajriba to'plaganmiz)."
+        )
+
+    st.caption("Jamoa nomi: NOWL TEAM ·  Computer Vision Hackathon · E2A46D42")
 
 # ---- Yondashuv ----
 with tabs[1]:
-    st.header("Muammo va Yondashuv")
-    st.markdown("""
-**Pipeline (umumiy chizma):**
+    st.header("Muammo va yondashuv")
 
-`Video → Frame extraction → Object detection (YOLO) → Tracking (ByteTrack) →
-Rule-based event logic (Part A) → Risk scoring (Part B) → predictions.json`
+    with st.container(border=True):
+        st.subheader("Pipeline")
+        st.markdown(
+            "`Video` → `Frame extraction` → `Object detection (YOLO)` → "
+            "`Tracking (ByteTrack)` → `Rule-based event logic (Part A)` → "
+            "`Risk scoring (Part B)` → `predictions.json`"
+        )
 
-- **Rule-based qismlar:** stopped_vehicle (10s harakatsizlik), wrong_way
-  (harakat vektori tahlili), jaywalking (piyoda-yo'l zonasi kesishishi),
-  congestion (tezlik pasayishi + zichlik).
-- **Learned qismlar:** obyekt detektsiya (YOLOv8x/RT-DETR), tracking (ByteTrack).
+    col_a, col_b = st.columns(2)
+    with col_a:
+        with st.container(border=True):
+            st.markdown("**Qoidaga asoslangan (rule-based)**")
+            st.markdown(
+                "- `stopped_vehicle` — 10s harakatsizlik\n"
+                "- `wrong_way` — harakat vektori tahlili\n"
+                "- `jaywalking` — piyoda / yo'l zonasi kesishishi\n"
+                "- `congestion` — tezlik pasayishi + zichlik"
+            )
+    with col_b:
+        with st.container(border=True):
+            st.markdown("**O'rganilgan (learned)**")
+            st.markdown(
+                "- Obyekt detektsiya — YOLOv8x / RT-DETR\n"
+                "- Tracking — ByteTrack"
+            )
 
-TODO: Chizmani rasm/diagram sifatida qo'shing (draw.io yoki excalidraw bilan
-chizib, screenshot qilib joylashtirsangiz bo'ladi). Ishlatilgan datasetlar va
-litsenziyalarini shu yerga yozing.
-    """)
-    st.warning("Bu bo'lim TODO — 1 va 2-ishtirokchi bilan kelishib to'ldiring.")
+    st.warning(
+        "Diagramma rasmi va ishlatilgan datasetlar/litsenziyalar hali qo'shilmagan — "
+        "1 va 2-ishtirokchi bilan kelishib to'ldiriladi."
+    )
 
 # ---- EDA ----
 with tabs[2]:
     st.header("Sample videolar bo'yicha EDA")
 
-    # --- Oldindan hisoblangan (statik) natijalar — hech narsa yuklamasdan ko'rinadi ---
     eda_json_path = os.path.join("assets", "eda_stats.json")
     if os.path.exists(eda_json_path):
         with open(eda_json_path, "r", encoding="utf-8") as f:
             precomputed = json.load(f)
-        st.subheader("Sample videolar statistikasi")
-        pre_df = pd.DataFrame(precomputed)[
-            ["name", "fps", "width", "height", "n_frames", "duration_sec"]
-        ]
-        st.dataframe(pre_df, use_container_width=True)
 
+        with st.container(border=True):
+            st.subheader("Sample videolar statistikasi")
+            pre_df = pd.DataFrame(precomputed)[
+                ["name", "fps", "width", "height", "n_frames", "duration_sec"]
+            ]
+            st.dataframe(pre_df, width="stretch")
+
+        st.markdown("<br>", unsafe_allow_html=True)
         st.subheader("Harakat issiqlik xaritalari")
         cols = st.columns(2)
         for i, row in enumerate(precomputed):
@@ -180,7 +427,8 @@ with tabs[2]:
                 hm_path = os.path.join("assets", "heatmaps", hm)
                 if os.path.exists(hm_path):
                     with cols[i % 2]:
-                        st.image(hm_path, caption=row["name"], use_container_width=True)
+                        with st.container(border=True):
+                            st.image(hm_path, caption=row["name"], width="stretch")
         st.divider()
     else:
         st.info(
@@ -188,7 +436,6 @@ with tabs[2]:
             "`python precompute_eda.py` skriptini ishga tushiring."
         )
 
-    # --- Interaktiv qism: tashrif buyuruvchi o'z videosini yuklab ko'rishi mumkin ---
     st.subheader("O'zingiz sinab ko'ring")
     uploaded = st.file_uploader(
         "Istalgan video yuklang (.mp4) — tahlil shu yerda ko'rsatiladi",
@@ -204,30 +451,32 @@ with tabs[2]:
             stats["name"] = f.name
             rows.append(stats)
 
-            with st.expander(f"🎞 {f.name} — harakat issiqlik xaritasi"):
+            with st.expander(f"{f.name} — harakat issiqlik xaritasi"):
                 heat = motion_heatmap(tmp_path)
                 if heat is not None:
                     fig = px.imshow(heat, color_continuous_scale="inferno",
                                      labels=dict(color="Harakat intensivligi"))
-                    fig.update_layout(height=300, margin=dict(l=0, r=0, t=20, b=0))
-                    st.plotly_chart(fig, use_container_width=True)
+                    style_fig(fig, height=300)
+                    fig.update_layout(margin=dict(l=0, r=0, t=20, b=0))
+                    st.plotly_chart(fig, width="stretch")
                 else:
                     st.write("Videoda kadr topilmadi.")
             os.unlink(tmp_path)
 
         df = pd.DataFrame(rows)[["name", "fps", "width", "height", "n_frames", "duration_sec"]]
         st.subheader("Video statistikasi")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
     else:
         st.info("EDA uchun bir nechta sample videoni shu yerga yuklang.")
 
-    st.markdown("""
-**TODO (topilmalar shu yerga yoziladi):**
-- Yorug'lik sharoiti (kun/tun, soya)
-- Vaqt bo'yicha obyektlar soni (mashina/piyoda) grafigi
-- Yo'l yo'nalishlari va traektoriyalar xaritasi
-- Traffic zichligi vaqt bo'yicha
-    """)
+    with st.container(border=True):
+        st.markdown("**Keyingi topilmalar (rejalashtirilgan)**")
+        st.markdown(
+            "- Yorug'lik sharoiti (kun/tun, soya)\n"
+            "- Vaqt bo'yicha obyektlar soni (mashina/piyoda) grafigi\n"
+            "- Yo'l yo'nalishlari va traektoriyalar xaritasi\n"
+            "- Traffic zichligi vaqt bo'yicha"
+        )
 
 # ---- Live Demo ----
 with tabs[3]:
@@ -243,11 +492,11 @@ with tabs[3]:
         st.video(demo_file)
 
         progress = st.empty()
-        progress.info("⏳ Hodisalar aniqlanmoqda (Part A)...")
+        progress.info("Hodisalar aniqlanmoqda (Part A)...")
         t0 = time.time()
         events = detect_events(video_path)
         t1 = time.time()
-        progress.success(f"✅ {len(events)} ta hodisa topildi ({t1 - t0:.1f}s)")
+        progress.success(f"{len(events)} ta hodisa topildi ({t1 - t0:.1f}s)")
 
         stats = video_basic_stats(video_path)
         duration = stats["duration_sec"]
@@ -255,43 +504,27 @@ with tabs[3]:
         st.subheader("Hodisalar jadvali")
         if events:
             ev_df = pd.DataFrame(events, columns=["Boshlanish (s)", "Tugash (s)", "Sinf"])
-            st.dataframe(ev_df, use_container_width=True)
+            st.dataframe(ev_df, width="stretch")
         else:
             st.write("Hodisa topilmadi.")
 
         st.subheader("Vaqt chizig'i (timeline)")
-        st.plotly_chart(timeline_figure(events, duration), use_container_width=True)
+        st.plotly_chart(timeline_figure(events, duration), width="stretch")
 
         st.subheader("Xavf grafigi (Risk curve, Part B)")
         with st.spinner("Risk hisoblanmoqda..."):
             ts, scores = risk_curve(video_path)
-        risk_fig = go.Figure()
-        risk_fig.add_trace(go.Scatter(x=ts, y=scores, mode="lines", name="Risk"))
-        risk_fig.add_hline(y=0.5, line_dash="dash", line_color="red",
-                            annotation_text="θ = 0.5 (alarm chegarasi)")
-        risk_fig.update_layout(xaxis_title="Vaqt (s)", yaxis_title="P(avariya ≤ 5s ichida)",
-                                yaxis_range=[0, 1], height=350)
-        st.plotly_chart(risk_fig, use_container_width=True)
+        st.plotly_chart(risk_figure(ts, scores), width="stretch")
 
         os.unlink(video_path)
     else:
         st.info("Demo uchun video yuklang.")
 
 # ---- Natijalar ----
-# ============================================================================
-# APP.PY GA O'ZGARTIRISH QO'LLANMASI
-#
-# 1) app.py boshidagi importlar qatoriga (boshqa importlardan keyin) qo'shing:
-#      import glob
-#
-# 2) app.py dagi eski "Natijalar" blokini (with tabs[4]: ... st.info("""TODO...""")
-#    qismini) TO'LIQ o'chirib, o'rniga pastdagi blokni qo'ying.
-# ============================================================================
-
 with tabs[4]:
     st.header("Sample videolar bo'yicha natijalar")
     st.caption(
-        "Har bir sample video oldindan `precompute_results.py` skripti bilan "
+        "Har bir sample video oldindan precompute_results.py skripti bilan "
         "qayta ishlangan — hakamlar hech narsa yuklamasdan natijalarni ko'radi."
     )
 
@@ -306,11 +539,10 @@ with tabs[4]:
         )
     else:
         st.info(
-            "⚠️ Quyidagi natijalar hozircha **stub model** bilan olingan. "
-            "1-ishtirokchining haqiqiy `solution.py` fayli tayyor bo'lgach, "
-            "`precompute_results.py` qayta ishga tushiriladi va bu sahifa "
-            "avtomatik yangi (haqiqiy) natijalarni ko'rsatadi.",
-            icon="⚠️",
+            "Quyidagi natijalar hozircha stub model bilan olingan. "
+            "1-ishtirokchining haqiqiy solution.py fayli tayyor bo'lgach, "
+            "precompute_results.py qayta ishga tushiriladi va bu sahifa "
+            "avtomatik yangi (haqiqiy) natijalarni ko'rsatadi."
         )
 
         video_names = []
@@ -328,42 +560,39 @@ with tabs[4]:
         col_left, col_right = st.columns([3, 2])
 
         with col_left:
-            annotated_name = data.get("annotated_video")
-            annotated_path = os.path.join(RESULTS_DIR, annotated_name) if annotated_name else None
-            if annotated_path and os.path.exists(annotated_path):
-                st.video(annotated_path)
-            else:
-                st.warning("Annotatsiyalangan video topilmadi.")
+            with st.container(border=True):
+                annotated_name = data.get("annotated_video")
+                annotated_path = os.path.join(RESULTS_DIR, annotated_name) if annotated_name else None
+                if annotated_path and os.path.exists(annotated_path):
+                    st.video(annotated_path)
+                else:
+                    st.warning("Annotatsiyalangan video topilmadi.")
 
         with col_right:
-            st.metric("Davomiyligi", f"{data['duration_sec']} s")
-            st.metric("FPS", data["fps"])
-            st.metric("Topilgan hodisalar", len(data["events"]))
+            m1, m2 = st.columns(2)
+            m1.metric("Davomiyligi", f"{data['duration_sec']} s")
+            m2.metric("FPS", data["fps"])
+            m3, m4 = st.columns(2)
+            m3.metric("Topilgan hodisalar", len(data["events"]))
             max_risk = max((r[1] for r in data["risk"]), default=0.0)
-            st.metric("Eng yuqori risk", f"{max_risk:.2f}")
+            m4.metric("Eng yuqori risk", f"{max_risk:.2f}")
 
         st.subheader("Hodisalar jadvali")
         if data["events"]:
             ev_df = pd.DataFrame(data["events"], columns=["Boshlanish (s)", "Tugash (s)", "Sinf"])
-            st.dataframe(ev_df, use_container_width=True)
+            st.dataframe(ev_df, width="stretch")
         else:
             st.write("Hodisa topilmadi.")
 
         st.subheader("Vaqt chizig'i (timeline)")
-        st.plotly_chart(timeline_figure(data["events"], data["duration_sec"]), use_container_width=True)
+        st.plotly_chart(timeline_figure(data["events"], data["duration_sec"]), width="stretch")
 
         st.subheader("Xavf grafigi (Risk curve, Part B)")
         ts = [r[0] for r in data["risk"]]
         scores = [r[1] for r in data["risk"]]
-        risk_fig = go.Figure()
-        risk_fig.add_trace(go.Scatter(x=ts, y=scores, mode="lines", name="Risk"))
-        risk_fig.add_hline(y=0.5, line_dash="dash", line_color="red",
-                            annotation_text="θ = 0.5 (alarm chegarasi)")
-        risk_fig.update_layout(xaxis_title="Vaqt (s)", yaxis_title="P(avariya ≤ 5s ichida)",
-                                yaxis_range=[0, 1], height=350)
-        st.plotly_chart(risk_fig, use_container_width=True)
+        st.plotly_chart(risk_figure(ts, scores), width="stretch")
 
-        with st.expander("📉 Halol failure case / cheklovlar"):
+        with st.expander("Halol failure case / cheklovlar"):
             st.markdown(
                 "- Hozircha stub model — hodisalar tasodifiy generatsiya qilingan, "
                 "haqiqiy detektsiya emas.\n"
@@ -371,29 +600,38 @@ with tabs[4]:
                 "(masalan noto'g'ri sinf, o'tkazib yuborilgan hodisa) yoziladi."
             )
 
-        st.divider()
         st.caption(f"Barcha {len(result_files)} ta sample video uchun natijalar tayyor.")
 
 # ---- Hisobot ----
 with tabs[5]:
-    st.header("Texnik hisobot (1 sahifa)")
-    st.markdown("""
-**Nima ishladi:**
-- TODO
+    st.header("Texnik hisobot")
+    st.caption("Bir sahifalik xulosa — nima ishladi, nima ishlamadi, keyingi qadamlar.")
 
-**Nima ishlamadi / qiyinchiliklar:**
-- TODO
+    col_a, col_b = st.columns(2)
+    with col_a:
+        with st.container(border=True):
+            st.markdown("**Nima ishladi**")
+            st.markdown("- TODO")
+    with col_b:
+        with st.container(border=True):
+            st.markdown("**Nima ishlamadi / qiyinchiliklar**")
+            st.markdown("- TODO")
 
-**Keyingi qadamlar (agar davom etsa):**
-- TODO
+    with st.container(border=True):
+        st.markdown("**Keyingi qadamlar (agar davom etsa)**")
+        st.markdown("- TODO")
 
-**Havolalar:**
-- Repository: TODO
-- Weights: TODO
-- predictions_samples.json: TODO
-    """)
+    with st.container(border=True):
+        st.markdown("**Havolalar**")
+        st.markdown(
+            "- Repository: TODO\n"
+            "- Weights: TODO\n"
+            "- predictions_samples.json: TODO"
+        )
 
 st.divider()
-st.caption("⚠️ Bu sahifa hozircha STUB model (`solution_stub.py`) bilan ishlayapti — "
-           "1-ishtirokchining haqiqiy solution.py tayyor bo'lgach, app.py dagi import "
-           "qatorini almashtiring.")
+st.caption(
+    "Bu sahifa hozircha stub model (solution_stub.py) bilan ishlayapti — "
+    "1-ishtirokchining haqiqiy solution.py tayyor bo'lgach, app.py dagi import "
+    "qatorini almashtiring."
+)
